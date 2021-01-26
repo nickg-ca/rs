@@ -10,3 +10,7 @@ Just run `make`.
 ## Usage
 
 Run something like `./rs em0`, where em0 is replaced with your own WAN interface name. Must be run as root or with the capability to create raw sockets.
+
+## OS Support
+
+Only tested so far on macOS and OpenBSD.
