@@ -1,16 +1,9 @@
 #include <sys/socket.h> 
 #include <netinet/in.h>
 #include <netinet/icmp6.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <errno.h>
-#include <sys/types.h> 
-#include <netinet/in.h>
 #include <net/if.h>
-#include <ifaddrs.h>
-#include <string.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 int main(int argc, char** argv) {
 	if(argc != 2) {
@@ -19,25 +12,15 @@ int main(int argc, char** argv) {
 	}
 	char* interface = argv[1];
 
-	struct protoent * pent = getprotobyname("ipv6-icmp");
-	if(0 == pent) {
-		fprintf(stderr,"Error finding ipv6-icmp protocol\n");
-		return -1;
-	}
-	int proto = pent->p_proto;//IPPROTO_ICMPV6
-	int s = socket(AF_INET6,SOCK_RAW,proto);
+	int s = socket(AF_INET6,SOCK_RAW,IPPROTO_ICMPV6);
 	if(-1 == s) {
 		fprintf(stderr,"Error %d creating socket\n",errno);
 		return -1;
 	}
-	int if_index = if_nametoindex(interface);
-	int err = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_IF, &if_index, sizeof(if_index));
-	if(-1 == err) {
-		fprintf(stderr,"Couldn't set socket to broadcast %d\n",errno);
-		return -1;
-	}
+
+	//See https://tools.ietf.org/html/rfc4861 section 4.1 (Router Solicitation Message Format)
 	unsigned int hops=255;
-	err = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof(hops));
+	int err = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof(hops));
 	if(-1 == err) {
 		fprintf(stderr,"Couldn't set socket hops %d\n",errno);
 		return -1;
@@ -46,16 +29,12 @@ int main(int argc, char** argv) {
 	struct sockaddr_in6 allrouters = {0};
 	allrouters.sin6_family=AF_INET6;
 	allrouters.sin6_len=sizeof(allrouters);
+	//ff02::02 is the link-local all routers multicast address
 	allrouters.sin6_addr = (struct in6_addr){{{0xff,0x02,0,0,0,0,0,0,0,0,0,0,0,0,0,0x02}}};
+	//link local messages require a scope id so that the system knows which interface this is for
 	allrouters.sin6_scope_id=if_nametoindex(interface);
 
-	struct in6_addr lladdr = {0};
-
-	char buf[INET6_ADDRSTRLEN+1] = {0};
-	const char* res = inet_ntop(AF_INET6,&allrouters.sin6_addr,buf,sizeof(buf));
-	printf("allrouters is %s\n",res);
-
-	//Note checksum is allegedly filled in by kernel on outgoing messages
+	//The checksum is filled in by kernel on outgoing messages so we don't have to do anything here
 	struct nd_router_solicit hdr = {0};
 	hdr.nd_rs_hdr = (struct icmp6_hdr){ND_ROUTER_SOLICIT, 0, 0, 0};
 
