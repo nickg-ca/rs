@@ -9,6 +9,8 @@
 #include <net/if.h>
 #include <ifaddrs.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 int main(int argc, char** argv) {
 	if(argc != 2) {
@@ -28,49 +30,36 @@ int main(int argc, char** argv) {
 		fprintf(stderr,"Error %d creating socket\n",errno);
 		return -1;
 	}
-//Wasn't sure if this was needed but apparently not
-#if 0
-	int err = setsockopt(s, SOL_SOCKET, SO_BROADCAST, 0, 0);
+	int if_index = if_nametoindex(interface);
+	int err = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_IF, &if_index, sizeof(if_index));
 	if(-1 == err) {
 		fprintf(stderr,"Couldn't set socket to broadcast %d\n",errno);
 		return -1;
 	}
-#endif
-	struct sockaddr_in6 lladdr = {0};
-
-	struct ifaddrs * ifap = 0;
-	int err = getifaddrs(&ifap);
+	unsigned int hops=255;
+	err = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof(hops));
 	if(-1 == err) {
-		fprintf(stderr, "Error %d obtaining interface addresses\n",errno);
+		fprintf(stderr,"Couldn't set socket hops %d\n",errno);
 		return -1;
 	}
-	struct ifaddrs* ifa_next = ifap->ifa_next;
-	int found = 0;
-	while(ifa_next != 0) {
-		if(!strcmp(interface,ifa_next->ifa_name) &&
-				ifa_next->ifa_addr->sa_family == AF_INET6 &&
-				((struct sockaddr_in6*)ifa_next->ifa_addr)->sin6_addr.__u6_addr.__u6_addr16[0]==0x80fe) {
-			memcpy(&lladdr,ifa_next->ifa_addr,sizeof(lladdr));
-			found = 1;
-			break;
-		}
-		ifa_next = ifa_next->ifa_next;
-	}
-	ifa_next = 0;//don't want to accidentally reference this later
 
-	//clean up ifap memory
-	freeifaddrs(ifap);
-	ifap=0;
+	struct sockaddr_in6 allrouters = {0};
+	allrouters.sin6_family=AF_INET6;
+	allrouters.sin6_len=sizeof(allrouters);
+	allrouters.sin6_addr = (struct in6_addr){{{0xff,0x02,0,0,0,0,0,0,0,0,0,0,0,0,0,0x02}}};
+	allrouters.sin6_scope_id=if_nametoindex(interface);
 
-	if(!found) {
-		fprintf(stderr,"Could not obtain link local address for interface %s\n",interface);
-		return -1;
-	}
+	struct in6_addr lladdr = {0};
+
+	char buf[INET6_ADDRSTRLEN+1] = {0};
+	const char* res = inet_ntop(AF_INET6,&allrouters.sin6_addr,buf,sizeof(buf));
+	printf("allrouters is %s\n",res);
 
 	//Note checksum is allegedly filled in by kernel on outgoing messages
-	struct icmp6_hdr hdr = {ND_ROUTER_SOLICIT, 0, 0, 0};
+	struct nd_router_solicit hdr = {0};
+	hdr.nd_rs_hdr = (struct icmp6_hdr){ND_ROUTER_SOLICIT, 0, 0, 0};
 
-	err = sendto(s, &hdr, sizeof(hdr), 0, (struct sockaddr*)&lladdr, sizeof(lladdr));
+	err = sendto(s, &hdr, sizeof(hdr), 0, (struct sockaddr*)&allrouters, sizeof(allrouters));
 	if(-1 == err) {
 		fprintf(stderr,"Error sending: %d\n",errno);
 		return -1;
