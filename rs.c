@@ -11,7 +11,11 @@
 #include <string.h>
 
 int main(int argc, char** argv) {
-	char* interface = "em0";
+	if(argc != 2) {
+		fprintf(stderr, "Pass in the interface on which to send the RS as an argument\n");
+		return -1;
+	}
+	char* interface = argv[1];
 
 	struct protoent * pent = getprotobyname("ipv6-icmp");
 	if(0 == pent) {
